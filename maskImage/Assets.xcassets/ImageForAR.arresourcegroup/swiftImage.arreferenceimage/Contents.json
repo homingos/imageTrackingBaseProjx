@@ -1,0 +1,15 @@
+{
+  "images" : [
+    {
+      "filename" : "swiftImage.jpeg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "properties" : {
+    "width" : 0.77708333333333335
+  }
+}

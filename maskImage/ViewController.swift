@@ -29,10 +29,18 @@ class ViewController: UIViewController,ARSCNViewDelegate {
                 print("No reference images found.")
                 return
         }
-
-        guard let image = UIImage(named: "test11") else {
-            print("Could not create image")
-            return
+        let rootImages = [
+            "0", "1", "2", "2_1", "3", "4"
+        ]
+        var imageSet: [String: UIImage] = [:]
+        
+        for imageName in rootImages {
+            if let image = UIImage(named: imageName) {
+                print("Found image: \(imageName)")
+                imageSet[imageName] = image
+            } else {
+                print("Missing image: \(imageName)")
+            }
         }
         
         let configuration = ARImageTrackingConfiguration()
@@ -41,7 +49,7 @@ class ViewController: UIViewController,ARSCNViewDelegate {
 
         sceneView.session.run(configuration)
         
-        if let metalView = MetalSineWaveView(frame: view.bounds, image: image) {
+        if let metalView = MetalSineWaveView(frame: view.bounds, imageSet: imageSet) {
             self.metalView = metalView
         }
         

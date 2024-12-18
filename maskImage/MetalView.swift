@@ -10,8 +10,15 @@ import MetalKit
 import UIKit
 
 struct VertexInfo{
-    var position: SIMD2<Float>
+    var position: SIMD3<Float>
     var textureCoordinate: SIMD2<Float>
+}
+
+struct LayerInfo{
+    let name: String
+    let layerPriority: Int
+    let image: UIImage?
+    var texture: MTLTexture?
 }
 
 class MetalSineWaveView: UIView {
@@ -29,12 +36,13 @@ class MetalSineWaveView: UIView {
     private var time: Float = 0.0
     
     // Image to render
-    private let image: UIImage
+    private let imageSet: [String: UIImage]
+    private var layerInfo: [LayerInfo] = []
     
     // Metalayer for rendering
     private var metalLayer: CAMetalLayer!
     
-    init?(frame: CGRect, image: UIImage) {
+    init?(frame: CGRect, imageSet:  [String: UIImage]) {
         // Create Metal device
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("Cannot create Metal device")
@@ -42,7 +50,7 @@ class MetalSineWaveView: UIView {
         }
         
         self.device = device
-        self.image = image
+        self.imageSet = imageSet
         
         // Create command queue
         guard let commandQueue = device.makeCommandQueue() else {
@@ -53,10 +61,10 @@ class MetalSineWaveView: UIView {
         
         // x, y, u, v
         vertexInfo = [
-            VertexInfo(position: SIMD2(-1.0, -1.0), textureCoordinate: SIMD2(0.0, 1.0)),
-            VertexInfo(position: SIMD2(1.0, -1.0), textureCoordinate: SIMD2(1.0, 1.0)),
-            VertexInfo(position: SIMD2(-1.0, 1.0), textureCoordinate: SIMD2(0.0, 0.0)),
-            VertexInfo(position: SIMD2(1.0, 1.0), textureCoordinate: SIMD2(1.0, 0.0))
+            VertexInfo(position: SIMD3(-1.0, -1.0, 0.0), textureCoordinate: SIMD2(0.0, 1.0)),
+            VertexInfo(position: SIMD3(1.0, -1.0, 0.0), textureCoordinate: SIMD2(1.0, 1.0)),
+            VertexInfo(position: SIMD3(-1.0, 1.0, 0.0), textureCoordinate: SIMD2(0.0, 0.0)),
+            VertexInfo(position: SIMD3(1.0, 1.0, 0.0), textureCoordinate: SIMD2(1.0, 0.0))
         ]
         
         // Create vertex buffer
@@ -82,13 +90,13 @@ class MetalSineWaveView: UIView {
         // Call super after all initializations
         super.init(frame: frame)
         self.backgroundColor = .cyan
-
+        assignLayer(imageSet: imageSet)
         createRenderPipeline()
         // Setup Metal layer
         setupMetalLayer()
         
         // Load image texture
-        loadTexture()
+        loadTextures()
         // Setup animation
         setupDisplayLink()
     }
@@ -107,21 +115,29 @@ class MetalSineWaveView: UIView {
         layer.addSublayer(metalLayer)
     }
     
-    private func loadTexture() {
-        guard let cgImage = image.cgImage else {
-            print("Cannot convert UIImage to CGImage")
-            return
+    private func assignLayer(imageSet: [String:UIImage]){
+        for imageName in imageSet.keys{
+            let layerPriority = extractIntValue(from: imageName) ?? 0
+            let layer = LayerInfo(name: imageName, layerPriority: layerPriority, image: imageSet[imageName])
+            layerInfo.append(layer)
         }
-        
+    }
+    
+    private func loadTextures() {
         let textureLoader = MTKTextureLoader(device: device)
-        
-        do {
-            sourceTexture = try textureLoader.newTexture(
-                cgImage: cgImage,
-                options: [:]
-            )
-        } catch {
-            print("Error loading texture: \(error)")
+
+        for var layer in layerInfo{
+            if let image = layer.image, let cgImage = image.cgImage{
+                do {
+                    layer.texture = try textureLoader.newTexture(
+                        cgImage: cgImage,
+                        options: [:]
+                    )
+                    sourceTexture = layer.texture
+                } catch {
+                    print("Error loading texture: \(error)")
+                }
+            }
         }
     }
     
@@ -142,12 +158,12 @@ class MetalSineWaveView: UIView {
         pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         
         let vertexDescriptor = MTLVertexDescriptor()
-        vertexDescriptor.attributes[0].format = .float2
+        vertexDescriptor.attributes[0].format = .float3
         vertexDescriptor.attributes[0].offset = 0
         vertexDescriptor.attributes[0].bufferIndex = 0
         
         vertexDescriptor.attributes[1].format = .float2
-        vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD2<Float>>.stride
+        vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
         vertexDescriptor.attributes[1].bufferIndex = 0
         
         vertexDescriptor.layouts[0].stride = MemoryLayout<VertexInfo>.stride
@@ -224,4 +240,12 @@ class MetalSineWaveView: UIView {
         renderPassDescriptor.colorAttachments[0].storeAction = .store
         return renderPassDescriptor
     }
+}
+
+func extractIntValue(from string: String) -> Int? {
+    // Split the string by the "_" character
+    let components = string.split(separator: "_")
+    
+    // Take the first component and try to convert it to an Int
+    return Int(components.first ?? "")
 }

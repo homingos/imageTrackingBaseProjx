@@ -7,6 +7,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
+//rect
 struct VertexInput {
     float4 position [[attribute(0)]];
     float2 texCoords [[attribute(1)]];
@@ -29,7 +30,7 @@ vertex VertexOutput vertexShaderWithSineWave(VertexInput input [[stage_in]],
     float4 animatedPosition = input.position;
     animatedPosition.x += xOffset;
     
-    output.position = float4(animatedPosition.xy, 0.0, 1.0);
+    output.position = float4(animatedPosition.xy, 1.0);
     output.texCoords = input.texCoords;
     return output;
 }

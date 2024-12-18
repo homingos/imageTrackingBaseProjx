@@ -11,7 +11,7 @@ import ARKit
 class ViewController: UIViewController,ARSCNViewDelegate {
 
     @IBOutlet weak var sceneView: ARSCNView!
-    
+    private var metalView: MetalSineWaveView?
     
     private var maskNode: SCNNode?
     
@@ -30,11 +30,20 @@ class ViewController: UIViewController,ARSCNViewDelegate {
                 return
         }
 
+        guard let image = UIImage(named: "test11") else {
+            print("Could not create image")
+            return
+        }
+        
         let configuration = ARImageTrackingConfiguration()
         configuration.trackingImages = referenceImages
         configuration.maximumNumberOfTrackedImages = 1
 
         sceneView.session.run(configuration)
+        
+        if let metalView = MetalSineWaveView(frame: view.bounds, image: image) {
+            self.metalView = metalView
+        }
         
     }
     
@@ -49,7 +58,7 @@ class ViewController: UIViewController,ARSCNViewDelegate {
         // Create the main wider plane
         let plane = SCNPlane(width: width * 1.5, height: height)
         let material = SCNMaterial()
-        material.diffuse.contents = UIImage(named: "background.jpg")
+        material.diffuse.contents = metalView
         material.isDoubleSided = true
         
         let planeNode = SCNNode(geometry: plane)

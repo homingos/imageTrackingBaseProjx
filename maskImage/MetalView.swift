@@ -100,7 +100,7 @@ class MetalSineWaveView: UIView {
         for (index, layer) in sortedLayers.enumerated() {
 
             // Create vertices for each layer with appropriate z-value
-            let zValue = Float(index) * 0.1 // Adjust z-spacing as needed
+            let zValue = Float(layer.layerPriority) * 0.1 // Adjust z-spacing as needed
             let vertices = [
                 VertexInfo(position: SIMD3(-1.0, -1.0, zValue), textureCoordinate: SIMD2(0.0, 1.0)),
                 VertexInfo(position: SIMD3(1.0, -1.0, zValue), textureCoordinate: SIMD2(1.0, 1.0)),

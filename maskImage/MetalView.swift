@@ -14,11 +14,19 @@ struct VertexInfo{
     var textureCoordinate: SIMD2<Float>
 }
 
-struct LayerInfo{
+class LayerInfo {
     let name: String
     let layerPriority: Int
     let image: UIImage?
     var texture: MTLTexture?
+
+    // Initializer
+    init(name: String, layerPriority: Int, image: UIImage?, texture: MTLTexture? = nil) {
+        self.name = name
+        self.layerPriority = layerPriority
+        self.image = image
+        self.texture = texture
+    }
 }
 
 class MetalSineWaveView: UIView {
@@ -26,15 +34,15 @@ class MetalSineWaveView: UIView {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private var pipelineState: MTLRenderPipelineState!
-    private var vertexBuffer: MTLBuffer
+    private var vertexBuffers: [MTLBuffer] = []  // One buffer per layer
+    private var layerTextures: [MTLTexture] = []
     private var animationBuffer: MTLBuffer
-    private var sourceTexture: MTLTexture?
     private var vertexInfo: [VertexInfo] = []
     
     // Animation properties
     private var displayLink: CADisplayLink?
     private var time: Float = 0.0
-    
+    var value: Float = 0.0
     // Image to render
     private let imageSet: [String: UIImage]
     private var layerInfo: [LayerInfo] = []
@@ -59,26 +67,6 @@ class MetalSineWaveView: UIView {
         }
         self.commandQueue = commandQueue
         
-        // x, y, u, v
-        vertexInfo = [
-            VertexInfo(position: SIMD3(-1.0, -1.0, 0.0), textureCoordinate: SIMD2(0.0, 1.0)),
-            VertexInfo(position: SIMD3(1.0, -1.0, 0.0), textureCoordinate: SIMD2(1.0, 1.0)),
-            VertexInfo(position: SIMD3(-1.0, 1.0, 0.0), textureCoordinate: SIMD2(0.0, 0.0)),
-            VertexInfo(position: SIMD3(1.0, 1.0, 0.0), textureCoordinate: SIMD2(1.0, 0.0))
-        ]
-        
-        // Create vertex buffer
-        guard let vertexBuffer = device.makeBuffer(
-            bytes: vertexInfo,
-            length: MemoryLayout<VertexInfo>.stride * vertexInfo.count,
-            options: []
-        ) else {
-            print("Cannot create vertex buffer")
-            return nil
-        }
-        
-        self.vertexBuffer = vertexBuffer
-        
         // Create animation time buffer
         guard let animationBuffer = device.makeBuffer(length: MemoryLayout<Float>.size, options: []) else {
             print("Cannot create animation buffer")
@@ -89,8 +77,9 @@ class MetalSineWaveView: UIView {
 
         // Call super after all initializations
         super.init(frame: frame)
-        self.backgroundColor = .cyan
+        self.backgroundColor = .black
         assignLayer(imageSet: imageSet)
+        setupVertexBuffers()
         createRenderPipeline()
         // Setup Metal layer
         setupMetalLayer()
@@ -103,6 +92,30 @@ class MetalSineWaveView: UIView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupVertexBuffers() {
+        let sortedLayers = layerInfo.sorted { $0.layerPriority < $1.layerPriority }
+        
+        for (index, layer) in sortedLayers.enumerated() {
+
+            // Create vertices for each layer with appropriate z-value
+            let zValue = Float(index) * 0.1 // Adjust z-spacing as needed
+            let vertices = [
+                VertexInfo(position: SIMD3(-1.0, -1.0, zValue), textureCoordinate: SIMD2(0.0, 1.0)),
+                VertexInfo(position: SIMD3(1.0, -1.0, zValue), textureCoordinate: SIMD2(1.0, 1.0)),
+                VertexInfo(position: SIMD3(-1.0, 1.0, zValue), textureCoordinate: SIMD2(0.0, 0.0)),
+                VertexInfo(position: SIMD3(1.0, 1.0, zValue), textureCoordinate: SIMD2(1.0, 0.0))
+            ]
+            print("layer: \(zValue)")
+            guard let buffer = device.makeBuffer(
+                bytes: vertices,
+                length: MemoryLayout<VertexInfo>.stride * vertices.count,
+                options: []
+            ) else { continue }
+            
+            vertexBuffers.append(buffer)
+        }
     }
     
     private func setupMetalLayer() {
@@ -125,22 +138,37 @@ class MetalSineWaveView: UIView {
     
     private func loadTextures() {
         let textureLoader = MTKTextureLoader(device: device)
-
-        for var layer in layerInfo{
-            if let image = layer.image, let cgImage = image.cgImage{
+        let textureOptions: [MTKTextureLoader.Option: Any] = [
+            .generateMipmaps: true,                     // Enable mipmapping
+            .SRGB: false,                               // Linear color space for correct rendering
+            .textureUsage: MTLTextureUsage([.shaderRead, .renderTarget]).rawValue,
+            .allocateMipmaps: true                      // Allocate space for mipmaps
+        ]
+        for layer in layerInfo {
+            if let image = layer.image, let cgImage = image.cgImage {
                 do {
+                    // Create texture descriptor for high quality
+                    let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                        pixelFormat: .rgba8Unorm,
+                        width: cgImage.width,
+                        height: cgImage.height,
+                        mipmapped: true
+                    )
+                    textureDescriptor.usage = [.shaderRead, .renderTarget]
+                    textureDescriptor.storageMode = .private
+                    textureDescriptor.sampleCount = 1
+                    
                     layer.texture = try textureLoader.newTexture(
                         cgImage: cgImage,
-                        options: [:]
+                        options: textureOptions
                     )
-                    sourceTexture = layer.texture
+                    print("Layer texture loaded with high quality settings")
                 } catch {
                     print("Error loading texture: \(error)")
                 }
             }
         }
     }
-    
     
     private func createRenderPipeline() -> MTLRenderPipelineState? {
         // Create shader functions
@@ -156,6 +184,17 @@ class MetalSineWaveView: UIView {
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
+        
+        if let attachment = pipelineDescriptor.colorAttachments[0] {
+            attachment.isBlendingEnabled = true
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .sourceAlpha
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        } else {
+            print("Depth is not initlized")
+        }
         
         let vertexDescriptor = MTLVertexDescriptor()
         vertexDescriptor.attributes[0].format = .float3
@@ -190,7 +229,7 @@ class MetalSineWaveView: UIView {
         
         // Update time buffer
         let timePtr = animationBuffer.contents().bindMemory(to: Float.self, capacity: 1)
-        timePtr.pointee = time
+        timePtr.pointee = value
         
         // Trigger rendering
         render()
@@ -198,13 +237,23 @@ class MetalSineWaveView: UIView {
     
     private func render() {
         guard let drawable = metalLayer.nextDrawable(),
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              
-              let sourceTexture = sourceTexture else {
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
             return
         }
         let renderPassDescriptor = createRenderPassDescriptor(drawable: drawable)
-              
+        let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float,
+            width: Int(bounds.width),
+            height: Int(bounds.height),
+            mipmapped: false)
+        depthDescriptor.usage = .renderTarget
+        guard let depthTexture = device.makeTexture(descriptor: depthDescriptor) else { return }
+        
+        renderPassDescriptor.depthAttachment.texture = depthTexture
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.storeAction = .dontCare
+        
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             return
         }
@@ -212,18 +261,20 @@ class MetalSineWaveView: UIView {
         // Set render pipeline state
         renderEncoder.setRenderPipelineState(pipelineState)
         
-        // Set vertex buffer
-        renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        
         // Set time buffer
         renderEncoder.setVertexBuffer(animationBuffer, offset: 0, index: 1)
         
-        // Set texture
-        renderEncoder.setFragmentTexture(sourceTexture, index: 0)
-        
-        // Draw
-        renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-        
+        let sortedLayers = layerInfo.sorted { $0.layerPriority > $1.layerPriority }
+        for (index, layer) in sortedLayers.enumerated() {
+            guard let texture = layer.texture else {
+                print("text is nil")
+                continue
+            }
+            
+            renderEncoder.setVertexBuffer(vertexBuffers[index], offset: 0, index: 0)
+            renderEncoder.setFragmentTexture(texture, index: 0)
+            renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
         // End encoding
         renderEncoder.endEncoding()
         

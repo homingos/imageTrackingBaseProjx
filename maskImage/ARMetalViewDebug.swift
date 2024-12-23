@@ -13,6 +13,22 @@ struct VertexDebug {
     var texCoord: SIMD2<Float>
 }
 
+class LayerImage {
+    let name: String
+    let layerPriority: Int
+    let image: UIImage?
+    var texture: MTLTexture?
+
+    // Initializer
+    init(name: String, layerPriority: Int, image: UIImage?, texture: MTLTexture? = nil) {
+        self.name = name
+        self.layerPriority = layerPriority
+        self.image = image
+        self.texture = texture
+    }
+}
+
+
 class ARMetalViewDebug: MTKView {
     private var commandQueue: MTLCommandQueue!
     private var renderPipelineState: MTLRenderPipelineState!
@@ -28,7 +44,10 @@ class ARMetalViewDebug: MTKView {
     private var cameraTransform: simd_float4x4?
     private var projectionMatrix: simd_float4x4?
     
-    init?(frame: CGRect, device: MTLDevice) {
+    private var imageDic:[String: UIImage]!
+    private var layerImages: [LayerImage] = []
+    
+    init?(frame: CGRect, device: MTLDevice, imageDic: [String: UIImage]) {
         super.init(frame: frame, device: device)
         self.device = device
         
@@ -39,13 +58,64 @@ class ARMetalViewDebug: MTKView {
         self.backgroundColor = .clear
         self.framebufferOnly = false
         self.enableSetNeedsDisplay = true
+        
+        self.imageDic = imageDic
+        
         texture = loadTexture(named: "4")
         print("Setting up Metal")
         setupMetal()
+        
+        setLayerImage(layerImage: imageDic)
+        
         setupDefaultVertices()
     }
     required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    func setLayerImage(layerImage: [String: UIImage]){
+        guard let device else { return }
+        
+        self.imageDic = layerImage
+        let textureLoader = MTKTextureLoader(device: device)
+        let textureOptions: [MTKTextureLoader.Option: Any] = [
+            .generateMipmaps: true,                     // Enable mipmapping
+            .SRGB: false,                               // Linear color space for correct rendering
+            .textureUsage: MTLTextureUsage([.shaderRead, .renderTarget]).rawValue,
+            .allocateMipmaps: true                      // Allocate space for mipmaps
+        ]
+        
+        for ele in imageDic{
+            let imageName = ele.key
+            
+            let layerPriority = extractIntValue(from: imageName) ?? 0
+            let layer = LayerImage(name: imageName, layerPriority: layerPriority, image: ele.value)
+            if let image = layer.image, let cgImage = image.cgImage {
+                do {
+                    // Create texture descriptor for high quality
+                    let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                        pixelFormat: .rgba8Unorm,
+                        width: cgImage.width,
+                        height: cgImage.height,
+                        mipmapped: true
+                    )
+                    textureDescriptor.usage = [.shaderRead, .renderTarget]
+                    textureDescriptor.storageMode = .private
+                    textureDescriptor.sampleCount = 1
+                    
+                    layer.texture = try textureLoader.newTexture(
+                        cgImage: cgImage,
+                        options: textureOptions
+                    )
+                    print("Layer texture loaded with high quality settings")
+                } catch {
+                    print("Error loading texture: \(error)")
+                }
+            }
+            layerImages.append(layer)
+        }
+        
+        layerImages.sort { $0.layerPriority < $1.layerPriority }
     }
     
     private func setupMetal() {
@@ -253,4 +323,12 @@ class ARMetalViewDebug: MTKView {
         commandBuffer.present(drawable)
         commandBuffer.commit()
     }
+}
+
+func extractIntValue(from string: String) -> Int? {
+    // Split the string by the "_" character
+    let components = string.split(separator: "_")
+    
+    // Take the first component and try to convert it to an Int
+    return Int(components.first ?? "")
 }

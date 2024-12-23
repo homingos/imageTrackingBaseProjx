@@ -8,12 +8,12 @@
 import UIKit
 import ARKit
 
-class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
+class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SCNSceneRendererDelegate {
     @IBOutlet weak var sceneView: ARSCNView!
     private var metalView: ARMetalViewDebug?
     private var arSession: ARSession!
     private var currentImageAnchor: ARImageAnchor?
-    
+    private var displayLink: CADisplayLink?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -35,8 +35,21 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
             return
         }
         
+        let rootImages = [
+            "0", "1", "2", "2_1", "3", "4"
+        ]
+        var imageSet: [String: UIImage] = [:]
+        
+        for imageName in rootImages {
+            if let image = UIImage(named: imageName) {
+                print("Found image: \(imageName)")
+                imageSet[imageName] = image
+            } else {
+                print("Missing image: \(imageName)")
+            }
+        }
         // Create Metal view
-        metalView = ARMetalViewDebug(frame: view.bounds, device: device)
+        metalView = ARMetalViewDebug(frame: view.bounds, device: device, imageDic: imageSet)
         if let metalView = metalView {
             view.addSubview(metalView)
             metalView.frame = view.bounds
@@ -77,8 +90,38 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
         let options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]
         arSession.run(configuration, options: options)
         
+        displayLink = CADisplayLink(target: self, selector: #selector(displayLinkDidFire))
+        displayLink?.add(to: .main, forMode: .common)
     }
     
+    @objc private func displayLinkDidFire() {
+        guard let frame = sceneView.session.currentFrame else { return }
+        
+        let camera = frame.camera
+        let projectionMatrix = camera.projectionMatrix(for: .portrait,
+                                                       viewportSize: view.bounds.size,
+                                                       zNear: 0.001,
+                                                       zFar: 1000)
+        
+        if let imageAnchor = currentImageAnchor, imageAnchor.isTracked {
+            var coordinateSpaceTransform = matrix_identity_float4x4
+            coordinateSpaceTransform.columns.2.z = -1.0
+            
+            let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
+            
+            metalView?.updateTransforms(
+                anchorTransform: modelMatrix,
+                cameraTransform: camera.viewMatrix(for: .portrait),
+                projectionMatrix: projectionMatrix
+            )
+        }
+    }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Invalidate display link when view disappears
+        displayLink?.invalidate()
+        displayLink = nil
+    }
     override func viewDidAppear(_ animated: Bool) {
         DispatchQueue.main.async{
             guard let metalView = self.metalView else { return }
@@ -95,12 +138,27 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
 
 extension ViewController {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        // Get camera transform
+        // Get camera transform and projection matrix for this frame
         let camera = frame.camera
-        let cameraTransform = camera.transform
-        // If we have a current image anchor, update transforms
-        if let currentAnchor = currentImageAnchor {
-            //            metalView?.updateTransforms(anchorTransform: currentAnchor.transform, cameraTransform: cameraTransform)
+        let projectionMatrix = camera.projectionMatrix(for: .portrait,
+                                                       viewportSize: view.bounds.size,
+                                                       zNear: 0.001,
+                                                       zFar: 1000)
+        
+        // If we have a current image anchor
+        if let imageAnchor = currentImageAnchor {
+            var coordinateSpaceTransform = matrix_identity_float4x4
+            coordinateSpaceTransform.columns.2.z = -1.0
+            
+            let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
+            
+            // Update transforms every frame with latest camera view matrix
+            //            metalView?.updateTransforms(
+            //                anchorTransform: modelMatrix,
+            //                cameraTransform: camera.viewMatrix(for: .portrait),
+            //                projectionMatrix: projectionMatrix
+            //            )
+            //            print("ARFrame")
         }
     }
     
@@ -111,13 +169,13 @@ extension ViewController {
             currentImageAnchor = imageAnchor
             
             if let frame = session.currentFrame {
-                                print("calling update: \(imageAnchor.transform) + \(frame.camera.transform)")
+                print("calling update: \(imageAnchor.transform) + \(frame.camera.transform)")
                 let projectionMatrix = frame.camera.projectionMatrix(for: .portrait, viewportSize: view.bounds.size, zNear: 0.001, zFar: 1000)
                 var coordinateSpaceTransform = matrix_identity_float4x4
                 coordinateSpaceTransform.columns.2.z = -1.0
                 
                 let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
-                metalView?.updateTransforms(anchorTransform: modelMatrix, cameraTransform: frame.camera.viewMatrix(for: .portrait), projectionMatrix: projectionMatrix)
+//                metalView?.updateTransforms(anchorTransform: modelMatrix, cameraTransform: frame.camera.viewMatrix(for: .portrait), projectionMatrix: projectionMatrix)
             }
         }
     }
@@ -133,7 +191,36 @@ extension ViewController {
                 coordinateSpaceTransform.columns.2.z = -1.0
                 
                 let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
-                metalView?.updateTransforms(anchorTransform: modelMatrix, cameraTransform: frame.camera.viewMatrix(for: .portrait), projectionMatrix: projectionMatrix)
+                //                metalView?.updateTransforms(anchorTransform: modelMatrix, cameraTransform: frame.camera.viewMatrix(for: .portrait), projectionMatrix: projectionMatrix)
+                //                print("did update")
+            }
+        }
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        guard let frame = sceneView.session.currentFrame else { return }
+        
+        // Get camera transform and projection matrix for this frame
+        let camera = frame.camera
+        let projectionMatrix = camera.projectionMatrix(for: .portrait,
+                                                       viewportSize: view.bounds.size,
+                                                       zNear: 0.001,
+                                                       zFar: 1000)
+        
+        // If we have a current image anchor
+        if let imageAnchor = currentImageAnchor {
+            var coordinateSpaceTransform = matrix_identity_float4x4
+            coordinateSpaceTransform.columns.2.z = -1.0
+            
+            let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
+            
+//             Update transforms every frame with latest camera view matrix
+            DispatchQueue.main.async {
+                self.metalView?.updateTransforms(
+                    anchorTransform: modelMatrix,
+                    cameraTransform: camera.viewMatrix(for: .portrait),
+                    projectionMatrix: projectionMatrix
+                )
             }
         }
     }

@@ -158,7 +158,6 @@ extension ViewController {
                             cameraTransform: camera.viewMatrix(for: .portrait),
                             projectionMatrix: projectionMatrix
                         )
-            print("ARFrame: \(imageAnchor.isTracked)")
         }
     }
     

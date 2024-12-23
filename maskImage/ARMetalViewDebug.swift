@@ -201,7 +201,7 @@ class ARMetalViewDebug: MTKView {
         
         for (index, layer) in layerImages.enumerated() {
             // Calculate offset based on layer priority
-            let zOffset = Float(index) * 0.5 // Small z-offset to prevent z-fighting
+            let zOffset =  Float(layer.layerPriority) * 0.1 // Small z-offset to prevent z-fighting
             print("z offset: \(zOffset)")
             let vertices: [VertexDebug] = [
                 VertexDebug(position: SIMD3<Float>(-0.5, zOffset, -0.5 ), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),

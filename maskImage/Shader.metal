@@ -70,8 +70,19 @@ vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]],
 
 fragment float4 fragmentShaderDebug(VertexOut in [[stage_in]],
                                   array<texture2d<float>, 8> textures [[texture(0)]],
+                                  texture2d<float> maskTexture [[texture(8)]], // Mask texture
                                   sampler textureSampler [[sampler(0)]]) {
+    // Sample from the mask texture
+    float4 maskColor = maskTexture.sample(textureSampler, in.texCoord);
+    
+    // Only process fragments where the mask alpha is greater than 0
+    if (maskColor.a < 0.01) {
+        discard_fragment();
+    }
+    
     // Sample from the appropriate texture based on the index
     float4 color = textures[in.textureIndex].sample(textureSampler, in.texCoord);
-    return float4(color.rgb, color.a);
+    
+    // Modulate the alpha by the mask
+    return float4(color.rgb, color.a * maskColor.a);
 }

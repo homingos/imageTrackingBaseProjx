@@ -8,19 +8,19 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct VertexIn {
+struct VertexInput {
     float3 position [[attribute(0)]];
     float2 texCoord [[attribute(1)]];
 };
 
-struct VertexOut {
+struct VertexOutput {
     float4 position [[position]];
     float2 texCoord;
 };
 
-vertex VertexOut vertexShader(VertexIn in [[stage_in]],
+vertex VertexOutput vertexShader(VertexInput in [[stage_in]],
                               constant float4x4 *matrices [[buffer(1)]]) {
-    VertexOut out;
+    VertexOutput out;
     
     // Get matrices
     float4x4 modelMatrix = matrices[0];
@@ -35,30 +35,43 @@ vertex VertexOut vertexShader(VertexIn in [[stage_in]],
     return out;
 }
 
-fragment float4 fragmentShader(VertexOut in [[stage_in]]) {
+fragment float4 fragmentShader(VertexOutput in [[stage_in]]) {
     // Return semi-transparent green
     return float4(0.0, 1.0, 0.0, 0.8);
 }
 
+struct VertexIn {
+    float3 position [[attribute(0)]];
+    float2 texCoord [[attribute(1)]];
+    uint textureIndex [[attribute(2)]];  // Added to identify which texture to use
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+    uint textureIndex;  // Pass the texture index to fragment shader
+};
 
 vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]],
                                 constant float4x4 *matrices [[buffer(1)]]) {
     VertexOut out;
     
-    float4x4 modelMatrix = matrices[0];    // Image anchor transform
-    float4x4 viewMatrix = matrices[1];     // Camera transform
-    float4x4 projectionMatrix = matrices[2];// Perspective projection
+    float4x4 modelMatrix = matrices[0];
+    float4x4 viewMatrix = matrices[1];
+    float4x4 projectionMatrix = matrices[2];
     float4x4 modelViewMatrix = viewMatrix * modelMatrix;
     
     out.position = projectionMatrix * modelViewMatrix * float4(in.position, 1.0);
     out.texCoord = in.texCoord;
+    out.textureIndex = in.textureIndex;
     
     return out;
 }
 
 fragment float4 fragmentShaderDebug(VertexOut in [[stage_in]],
-                                  texture2d<float> diffuseTexture [[texture(0)]],
+                                  array<texture2d<float>, 8> textures [[texture(0)]],
                                   sampler textureSampler [[sampler(0)]]) {
-    float4 color = diffuseTexture.sample(textureSampler, in.texCoord);
-    return float4(color.rgb, color.a); 
+    // Sample from the appropriate texture based on the index
+    float4 color = textures[in.textureIndex].sample(textureSampler, in.texCoord);
+    return float4(color.rgb, color.a);
 }

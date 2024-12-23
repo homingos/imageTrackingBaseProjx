@@ -152,13 +152,13 @@ extension ViewController {
             
             let modelMatrix = simd_mul(imageAnchor.transform, coordinateSpaceTransform)
             
-            // Update transforms every frame with latest camera view matrix
-            //            metalView?.updateTransforms(
-            //                anchorTransform: modelMatrix,
-            //                cameraTransform: camera.viewMatrix(for: .portrait),
-            //                projectionMatrix: projectionMatrix
-            //            )
-            //            print("ARFrame")
+//             Update transforms every frame with latest camera view matrix
+                        metalView?.updateTransforms(
+                            anchorTransform: modelMatrix,
+                            cameraTransform: camera.viewMatrix(for: .portrait),
+                            projectionMatrix: projectionMatrix
+                        )
+            print("ARFrame: \(imageAnchor.isTracked)")
         }
     }
     

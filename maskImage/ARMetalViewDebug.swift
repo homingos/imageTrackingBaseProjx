@@ -11,6 +11,7 @@ import MetalKit
 struct VertexDebug {
     var position: SIMD3<Float>
     var texCoord: SIMD2<Float>
+    var textureIndex: UInt32
 }
 
 class LayerImage {
@@ -18,7 +19,7 @@ class LayerImage {
     let layerPriority: Int
     let image: UIImage?
     var texture: MTLTexture?
-
+    
     // Initializer
     init(name: String, layerPriority: Int, image: UIImage?, texture: MTLTexture? = nil) {
         self.name = name
@@ -32,19 +33,16 @@ class LayerImage {
 class ARMetalViewDebug: MTKView {
     private var commandQueue: MTLCommandQueue!
     private var renderPipelineState: MTLRenderPipelineState!
-    private var vertexBuffer: MTLBuffer!
-    private var indexBuffer: MTLBuffer!
-    private var uniformBuffer: MTLBuffer! // Buffer for transformation matrices
-    private var texture: MTLTexture?
+    private var vertexBuffers: [MTLBuffer] = []
+    private var indexBuffers: [MTLBuffer] = []
+    private var uniformBuffer: MTLBuffer!
     private var samplerState: MTLSamplerState?
-
     
-    // Add properties to store transforms
     private var anchorTransform: simd_float4x4?
     private var cameraTransform: simd_float4x4?
     private var projectionMatrix: simd_float4x4?
     
-    private var imageDic:[String: UIImage]!
+    private var imageDic: [String: UIImage]!
     private var layerImages: [LayerImage] = []
     
     init?(frame: CGRect, device: MTLDevice, imageDic: [String: UIImage]) {
@@ -61,13 +59,11 @@ class ARMetalViewDebug: MTKView {
         
         self.imageDic = imageDic
         
-        texture = loadTexture(named: "4")
-        print("Setting up Metal")
         setupMetal()
         
         setLayerImage(layerImage: imageDic)
         
-        setupDefaultVertices()
+//        setupDefaultVertices()
     }
     required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -116,6 +112,8 @@ class ARMetalViewDebug: MTKView {
         }
         
         layerImages.sort { $0.layerPriority < $1.layerPriority }
+        setupLayerVertices()
+
     }
     
     private func setupMetal() {
@@ -134,7 +132,6 @@ class ARMetalViewDebug: MTKView {
         
         createRenderPipeline()
         createSamplerState()
-
     }
     
     private func createSamplerState() {
@@ -150,22 +147,13 @@ class ARMetalViewDebug: MTKView {
     private func createRenderPipeline() {
         guard let device = self.device else { return }
         
-        // Get the default library
-        guard let library = device.makeDefaultLibrary() else {
-            print("Failed to create default library")
-            return
-        }
-        print("Default library created")
-        
-        // Create the shader functions
-        guard let vertexFunction = library.makeFunction(name: "vertexShaderDebug"),
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "vertexShaderDebug"),
               let fragmentFunction = library.makeFunction(name: "fragmentShaderDebug") else {
             print("Failed to create shader functions")
             return
         }
-        print("Shader functions created")
         
-        // Create pipeline descriptor
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.label = "Debug Render Pipeline"
         pipelineDescriptor.vertexFunction = vertexFunction
@@ -182,7 +170,7 @@ class ARMetalViewDebug: MTKView {
         attachment?.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         
-        // Configure vertex descriptor
+        // Configure vertex descriptor with texture index
         let vertexDescriptor = MTLVertexDescriptor()
         vertexDescriptor.attributes[0].format = .float3
         vertexDescriptor.attributes[0].offset = 0
@@ -192,16 +180,60 @@ class ARMetalViewDebug: MTKView {
         vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
         vertexDescriptor.attributes[1].bufferIndex = 0
         
+        vertexDescriptor.attributes[2].format = .uint
+        vertexDescriptor.attributes[2].offset = MemoryLayout<SIMD3<Float>>.stride + MemoryLayout<SIMD2<Float>>.stride
+        vertexDescriptor.attributes[2].bufferIndex = 0
+        
         vertexDescriptor.layouts[0].stride = MemoryLayout<VertexDebug>.stride
         
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
-
+        
         do {
             renderPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-            print("Pipeline state created successfully")
         } catch {
             print("Failed to create pipeline state: \(error)")
         }
+    }
+    
+    private func setupLayerVertices() {
+        vertexBuffers.removeAll()
+        indexBuffers.removeAll()
+        
+        for (index, layer) in layerImages.enumerated() {
+            // Calculate offset based on layer priority
+            let zOffset = Float(index) * 0.5 // Small z-offset to prevent z-fighting
+            print("z offset: \(zOffset)")
+            let vertices: [VertexDebug] = [
+                VertexDebug(position: SIMD3<Float>(-0.5, zOffset, -0.5 ), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(0.5, zOffset, -0.5), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(-0.5, zOffset, 0.5), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(0.5, zOffset, 0.5), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
+            ]
+            
+            let indices: [UInt16] = [
+                0, 1, 2,  // First triangle
+                2, 1, 3   // Second triangle
+            ]
+            
+            if let vertexBuffer = device?.makeBuffer(
+                bytes: vertices,
+                length: vertices.count * MemoryLayout<VertexDebug>.stride,
+                options: .storageModeShared
+            ) {
+                vertexBuffers.append(vertexBuffer)
+            }
+            
+            if let indexBuffer = device?.makeBuffer(
+                bytes: indices,
+                length: indices.count * MemoryLayout<UInt16>.stride,
+                options: .storageModeShared
+            ) {
+                indexBuffers.append(indexBuffer)
+            }
+        }
+        
+        let uniformBufferSize = MemoryLayout<simd_float4x4>.stride * 3
+        uniformBuffer = device?.makeBuffer(length: uniformBufferSize, options: .storageModeShared)
     }
     
     private func loadTexture(named name: String) -> MTLTexture? {
@@ -244,65 +276,66 @@ class ARMetalViewDebug: MTKView {
         setNeedsDisplay()
     }
     
-    private func setupDefaultVertices() {
-        // Define vertices in ARKit's coordinate system
-        // The image anchor's transform expects the plane to be in the X-Y plane
-        let vertices: [VertexDebug] = [
-            VertexDebug(position: SIMD3<Float>(-0.5, 0.0, -0.5), texCoord: SIMD2<Float>(0.0, 1.0)), // Bottom left
-            VertexDebug(position: SIMD3<Float>(0.5, 0.0, -0.5), texCoord: SIMD2<Float>(1.0, 1.0)),  // Bottom right
-            VertexDebug(position: SIMD3<Float>(-0.5, 0.0, 0.5), texCoord: SIMD2<Float>(0.0, 0.0)),  // Top left
-            VertexDebug(position: SIMD3<Float>(0.5, 0.0, 0.5), texCoord: SIMD2<Float>(1.0, 0.0))    // Top right
-        ]
-        
-        // Use counter-clockwise winding for front-facing triangles
-        let indices: [UInt16] = [
-            0, 1, 2,  // First triangle
-            2, 1, 3   // Second triangle
-        ]
-        
-        vertexBuffer = device?.makeBuffer(
-            bytes: vertices,
-            length: vertices.count * MemoryLayout<VertexDebug>.stride,
-            options: .storageModeShared
-        )
-        
-        indexBuffer = device?.makeBuffer(
-            bytes: indices,
-            length: indices.count * MemoryLayout<UInt16>.stride,
-            options: .storageModeShared
-        )
-        
-        // Create uniform buffer for matrices
-        let uniformBufferSize = MemoryLayout<simd_float4x4>.stride * 3
-        uniformBuffer = device?.makeBuffer(length: uniformBufferSize, options: .storageModeShared)
-    }
+    //    private func setupDefaultVertices() {
+    //        // Define vertices in ARKit's coordinate system
+    //        // The image anchor's transform expects the plane to be in the X-Y plane
+    //        let rectangleNum = UInt16(layerImages.count)
+    //
+    //        for i in 0..<rectangleNum {
+    //            let zLayer = Float(layerImages[Int(i)].layerPriority) * 0.5
+    //
+    //            vertices.append(VertexDebug(position: SIMD3<Float>(-0.5,zLayer , -0.5), texCoord: SIMD2<Float>(0.0, 1.0))) // Bottom left
+    //            vertices.append(VertexDebug(position: SIMD3<Float>(0.5, zLayer, -0.5), texCoord: SIMD2<Float>(1.0, 1.0)))  // Bottom right
+    //            vertices.append(VertexDebug(position: SIMD3<Float>(-0.5,zLayer, 0.5), texCoord: SIMD2<Float>(0.0, 0.0)))  // Top left
+    //            vertices.append(VertexDebug(position: SIMD3<Float>(0.5, zLayer, 0.5), texCoord: SIMD2<Float>(1.0, 0.0)))    // Top right
+    //
+    //            // Use counter-clockwise winding for front-facing triangles
+    //            let startIndex = i
+    //            indices.append(contentsOf: [
+    //                startIndex, startIndex + 1, startIndex + 2, // First triangle
+    //                startIndex + 2, startIndex + 1, startIndex + 3 // Second triangle
+    //            ])
+    //        }
+    //
+    //        vertexBuffer = device?.makeBuffer(
+    //            bytes: vertices,
+    //            length: vertices.count * MemoryLayout<VertexDebug>.stride,
+    //            options: .storageModeShared
+    //        )
+    //
+    //        indexBuffer = device?.makeBuffer(
+    //            bytes: indices,
+    //            length: indices.count * MemoryLayout<UInt16>.stride,
+    //            options: .storageModeShared
+    //        )
+    //
+    //        // Create uniform buffer for matrices
+    //
+    //    }
     
     override func draw(_ rect: CGRect) {
+        guard let uniformBuffer else { return }
+
         guard let drawable = currentDrawable,
               let commandBuffer = commandQueue?.makeCommandBuffer(),
               let renderPassDescriptor = currentRenderPassDescriptor,
               let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            print("returing")
             return
         }
         
-        renderEncoder.setRenderPipelineState(renderPipelineState)
-        renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        renderEncoder.setFragmentTexture(texture, index: 0)
         
+        renderEncoder.setRenderPipelineState(renderPipelineState)
         renderEncoder.setFragmentSamplerState(samplerState, index: 0)
         
+        // Update uniform buffer with matrices
         let matrices = uniformBuffer.contents().assumingMemoryBound(to: simd_float4x4.self)
-        
         if let anchor = anchorTransform,
            let camera = cameraTransform,
            let projection = projectionMatrix {
-            // Use AR transforms
-            matrices[0] = anchor // Model matrix (image anchor transform)
-            matrices[1] = camera // View matrix (inverse camera transform)
-            matrices[2] = projection // Use ARKit's projection matrix
+            matrices[0] = anchor
+            matrices[1] = camera
+            matrices[2] = projection
         } else {
-            // Use identity matrices for testing
             let identity = matrix_identity_float4x4
             matrices[0] = identity
             matrices[1] = identity
@@ -311,13 +344,21 @@ class ARMetalViewDebug: MTKView {
         
         renderEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         
-        renderEncoder.drawIndexedPrimitives(
-            type: .triangle,
-            indexCount: 6,
-            indexType: .uint16,
-            indexBuffer: indexBuffer,
-            indexBufferOffset: 0
-        )
+        // Draw each layer
+        for i in 0..<layerImages.count {
+            if let texture = layerImages[i].texture {
+                renderEncoder.setVertexBuffer(vertexBuffers[i], offset: 0, index: 0)
+                renderEncoder.setFragmentTexture(texture, index: i)
+                
+                renderEncoder.drawIndexedPrimitives(
+                    type: .triangle,
+                    indexCount: 6,
+                    indexType: .uint16,
+                    indexBuffer: indexBuffers[i],
+                    indexBufferOffset: 0
+                )
+            }
+        }
         
         renderEncoder.endEncoding()
         commandBuffer.present(drawable)

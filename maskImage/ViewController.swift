@@ -14,11 +14,15 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
     private var arSession: ARSession!
     private var currentImageAnchor: ARImageAnchor?
     private var displayLink: CADisplayLink?
+    private var viewportSize: CGSize!
     
     override func viewDidLoad() {
+        viewportSize = view.bounds.size
+
         super.viewDidLoad()
         
         // Set up AR Scene View
+        
         sceneView.delegate = self
         
         // Create and set up AR Session
@@ -70,6 +74,7 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         
         view.bringSubviewToFront(metalView!)
         
+
         // Configure AR
         let configuration = ARImageTrackingConfiguration()
         if let trackedImages = ARReferenceImage.referenceImages(inGroupNamed: "ImageForAR", bundle: nil) {
@@ -202,7 +207,7 @@ extension ViewController {
         // Get camera transform and projection matrix for this frame
         let camera = frame.camera
         let projectionMatrix = camera.projectionMatrix(for: .portrait,
-                                                       viewportSize: view.bounds.size,
+                                                       viewportSize: viewportSize,
                                                        zNear: 0.001,
                                                        zFar: 1000)
         

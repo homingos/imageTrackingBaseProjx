@@ -45,12 +45,19 @@ class ARMetalViewDebug: MTKView {
     private var imageDic: [String: UIImage]!
     private var layerImages: [LayerImage] = []
     
+    private var stencilState: MTLDepthStencilState?
+    private var maskRenderPipelineState: MTLRenderPipelineState!
+    
+    private var writeStencilState: MTLDepthStencilState?
+    private var testStencilState: MTLDepthStencilState?
+    
     init?(frame: CGRect, device: MTLDevice, imageDic: [String: UIImage]) {
         super.init(frame: frame, device: device)
         self.device = device
         
         // Configure view properties
         self.colorPixelFormat = .bgra8Unorm
+        self.depthStencilPixelFormat = .depth32Float_stencil8
         self.clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         self.isOpaque = false
         self.backgroundColor = .clear
@@ -63,7 +70,7 @@ class ARMetalViewDebug: MTKView {
         
         setLayerImage(layerImage: imageDic)
         
-//        setupDefaultVertices()
+        //        setupDefaultVertices()
     }
     required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -113,7 +120,7 @@ class ARMetalViewDebug: MTKView {
         
         layerImages.sort { $0.layerPriority < $1.layerPriority }
         setupLayerVertices()
-
+        
     }
     
     private func setupMetal() {
@@ -131,6 +138,8 @@ class ARMetalViewDebug: MTKView {
         print("Command queue created")
         
         createRenderPipeline()
+        createMaskRenderPipeline()
+        createStencilState()
         createSamplerState()
     }
     
@@ -143,6 +152,92 @@ class ARMetalViewDebug: MTKView {
         descriptor.tAddressMode = .clampToEdge
         samplerState = device?.makeSamplerState(descriptor: descriptor)
     }
+    
+    private func createStencilState() {
+        // Write stencil state (for mask)
+        let writeDescriptor = MTLDepthStencilDescriptor()
+        writeDescriptor.depthCompareFunction = .always
+        writeDescriptor.isDepthWriteEnabled = false
+        
+        let writeFaceStencil = MTLStencilDescriptor()
+        writeFaceStencil.stencilCompareFunction = .always
+        writeFaceStencil.stencilFailureOperation = .zero
+        writeFaceStencil.depthFailureOperation = .zero
+        writeFaceStencil.depthStencilPassOperation = .replace
+        writeFaceStencil.readMask = 0xFF
+        writeFaceStencil.writeMask = 0xFF
+        writeDescriptor.frontFaceStencil = writeFaceStencil
+        writeDescriptor.backFaceStencil = writeFaceStencil
+        
+        writeStencilState = device?.makeDepthStencilState(descriptor: writeDescriptor)
+        
+        // Test stencil state (for content)
+        let testDescriptor = MTLDepthStencilDescriptor()
+        testDescriptor.depthCompareFunction = .always
+        testDescriptor.isDepthWriteEnabled = false
+        
+        let testFaceStencil = MTLStencilDescriptor()
+        testFaceStencil.stencilCompareFunction = .equal
+        testFaceStencil.stencilFailureOperation = .zero
+        testFaceStencil.depthFailureOperation = .zero
+        testFaceStencil.depthStencilPassOperation = .keep
+        testFaceStencil.readMask = 0xFF
+        testFaceStencil.writeMask = 0xFF
+        testDescriptor.frontFaceStencil = testFaceStencil
+        testDescriptor.backFaceStencil = testFaceStencil
+        
+        testStencilState = device?.makeDepthStencilState(descriptor: testDescriptor)
+    }
+    
+    private func createMaskRenderPipeline() {
+        guard let device = self.device else { return }
+        
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "maskVertexShader"),
+              let fragmentFunction = library.makeFunction(name: "maskFragmentShader") else {
+            print("Failed to create mask shader functions")
+            return
+        }
+        
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.label = "Mask Render Pipeline"
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
+        
+        // Configure color attachment for mask pass
+        let colorAttachment = pipelineDescriptor.colorAttachments[0]
+        colorAttachment?.pixelFormat = self.colorPixelFormat
+        colorAttachment?.isBlendingEnabled = false
+        colorAttachment?.writeMask = [] // Don't write to color buffer
+        
+        pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float_stencil8
+        pipelineDescriptor.stencilAttachmentPixelFormat = .depth32Float_stencil8
+        
+        // Add vertex descriptor for mask pipeline
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[0].format = .float3
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+        
+        vertexDescriptor.attributes[1].format = .float2
+        vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
+        vertexDescriptor.attributes[1].bufferIndex = 0
+        
+        vertexDescriptor.attributes[2].format = .uint
+        vertexDescriptor.attributes[2].offset = MemoryLayout<SIMD3<Float>>.stride + MemoryLayout<SIMD2<Float>>.stride
+        vertexDescriptor.attributes[2].bufferIndex = 0
+        
+        vertexDescriptor.layouts[0].stride = MemoryLayout<VertexDebug>.stride
+        
+        pipelineDescriptor.vertexDescriptor = vertexDescriptor
+        
+        do {
+            maskRenderPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        } catch {
+            print("Failed to create mask pipeline state: \(error)")
+        }
+    }
+    
     
     private func createRenderPipeline() {
         guard let device = self.device else { return }
@@ -159,6 +254,8 @@ class ARMetalViewDebug: MTKView {
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.colorAttachments[0].pixelFormat = self.colorPixelFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float_stencil8
+        pipelineDescriptor.stencilAttachmentPixelFormat = .depth32Float_stencil8
         
         // Configure blending
         let attachment = pipelineDescriptor.colorAttachments[0]
@@ -276,81 +373,68 @@ class ARMetalViewDebug: MTKView {
         setNeedsDisplay()
     }
     
-    //    private func setupDefaultVertices() {
-    //        // Define vertices in ARKit's coordinate system
-    //        // The image anchor's transform expects the plane to be in the X-Y plane
-    //        let rectangleNum = UInt16(layerImages.count)
-    //
-    //        for i in 0..<rectangleNum {
-    //            let zLayer = Float(layerImages[Int(i)].layerPriority) * 0.5
-    //
-    //            vertices.append(VertexDebug(position: SIMD3<Float>(-0.5,zLayer , -0.5), texCoord: SIMD2<Float>(0.0, 1.0))) // Bottom left
-    //            vertices.append(VertexDebug(position: SIMD3<Float>(0.5, zLayer, -0.5), texCoord: SIMD2<Float>(1.0, 1.0)))  // Bottom right
-    //            vertices.append(VertexDebug(position: SIMD3<Float>(-0.5,zLayer, 0.5), texCoord: SIMD2<Float>(0.0, 0.0)))  // Top left
-    //            vertices.append(VertexDebug(position: SIMD3<Float>(0.5, zLayer, 0.5), texCoord: SIMD2<Float>(1.0, 0.0)))    // Top right
-    //
-    //            // Use counter-clockwise winding for front-facing triangles
-    //            let startIndex = i
-    //            indices.append(contentsOf: [
-    //                startIndex, startIndex + 1, startIndex + 2, // First triangle
-    //                startIndex + 2, startIndex + 1, startIndex + 3 // Second triangle
-    //            ])
-    //        }
-    //
-    //        vertexBuffer = device?.makeBuffer(
-    //            bytes: vertices,
-    //            length: vertices.count * MemoryLayout<VertexDebug>.stride,
-    //            options: .storageModeShared
-    //        )
-    //
-    //        indexBuffer = device?.makeBuffer(
-    //            bytes: indices,
-    //            length: indices.count * MemoryLayout<UInt16>.stride,
-    //            options: .storageModeShared
-    //        )
-    //
-    //        // Create uniform buffer for matrices
-    //
-    //    }
-    
     override func draw(_ rect: CGRect) {
-        guard let uniformBuffer else { return }
-
-        guard let drawable = currentDrawable,
+        guard let uniformBuffer = uniformBuffer,
+              let drawable = currentDrawable,
               let commandBuffer = commandQueue?.makeCommandBuffer(),
               let renderPassDescriptor = currentRenderPassDescriptor,
-              let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+              let writeStencilState = writeStencilState,
+              let testStencilState = testStencilState else {
             return
         }
         
+        // First pass - render mask to stencil buffer
+        renderPassDescriptor.stencilAttachment.clearStencil = 0
+        renderPassDescriptor.stencilAttachment.loadAction = .clear
+        renderPassDescriptor.stencilAttachment.storeAction = .store
         
-        renderEncoder.setRenderPipelineState(renderPipelineState)
-        renderEncoder.setFragmentSamplerState(samplerState, index: 0)
+        // Clear color for first pass
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         
-        // Update uniform buffer with matrices
-        let matrices = uniformBuffer.contents().assumingMemoryBound(to: simd_float4x4.self)
-        if let anchor = anchorTransform,
-           let camera = cameraTransform,
-           let projection = projectionMatrix {
-            matrices[0] = anchor
-            matrices[1] = camera
-            matrices[2] = projection
-        } else {
-            let identity = matrix_identity_float4x4
-            matrices[0] = identity
-            matrices[1] = identity
-            matrices[2] = identity
+        guard let maskEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            return
         }
         
-        renderEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+        maskEncoder.setRenderPipelineState(maskRenderPipelineState)
+        maskEncoder.setDepthStencilState(writeStencilState)
+        maskEncoder.setStencilReferenceValue(1)
+        
+        // Render mask geometry
+        let maskVertices = createMaskVertices()
+        let maskVertexBuffer = device?.makeBuffer(
+            bytes: maskVertices,
+            length: maskVertices.count * MemoryLayout<VertexDebug>.stride,
+            options: .storageModeShared
+        )
+        
+        maskEncoder.setVertexBuffer(maskVertexBuffer, offset: 0, index: 0)
+        maskEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+        maskEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        maskEncoder.endEncoding()
+        
+        // Second pass - ensure we're keeping the stencil
+        renderPassDescriptor.stencilAttachment.loadAction = .load
+        renderPassDescriptor.colorAttachments[0].loadAction = .load
+        
+        // Second pass - render content with stencil test
+        let contentEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)!
+        contentEncoder.setRenderPipelineState(renderPipelineState)
+        contentEncoder.setDepthStencilState(testStencilState)
+        contentEncoder.setStencilReferenceValue(1)  // Must match the value written in the mask pass
+        contentEncoder.setFragmentSamplerState(samplerState, index: 0)
+        
+        // Update and set uniforms
+        updateUniforms(uniformBuffer)
+        contentEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         
         // Draw each layer
         for i in 0..<layerImages.count {
             if let texture = layerImages[i].texture {
-                renderEncoder.setVertexBuffer(vertexBuffers[i], offset: 0, index: 0)
-                renderEncoder.setFragmentTexture(texture, index: i)
+                contentEncoder.setVertexBuffer(vertexBuffers[i], offset: 0, index: 0)
+                contentEncoder.setFragmentTexture(texture, index: i)
                 
-                renderEncoder.drawIndexedPrimitives(
+                contentEncoder.drawIndexedPrimitives(
                     type: .triangle,
                     indexCount: 6,
                     indexType: .uint16,
@@ -360,9 +444,34 @@ class ARMetalViewDebug: MTKView {
             }
         }
         
-        renderEncoder.endEncoding()
+        contentEncoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+    
+    private func createMaskVertices() -> [VertexDebug] {
+        let size: Float = 0.5 // Adjust this value to change the size of the mask
+        return [
+            VertexDebug(position: SIMD3<Float>(-size, 0, -size), texCoord: SIMD2<Float>(0, 1), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(size,0, -size), texCoord: SIMD2<Float>(1, 1), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(-size, 0, size), texCoord: SIMD2<Float>(0, 0), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(size, 0, size), texCoord: SIMD2<Float>(1, 0), textureIndex: 0)
+        ]
+    }
+    
+    private func updateUniforms(_ buffer: MTLBuffer) {
+        let matrices = buffer.contents().assumingMemoryBound(to: simd_float4x4.self)
+        if let anchor = anchorTransform,
+           let camera = cameraTransform,
+           let projection = projectionMatrix {
+            matrices[0] = anchor
+            matrices[1] = camera
+            matrices[2] = projection
+        } else {
+            matrices[0] = matrix_identity_float4x4
+            matrices[1] = matrix_identity_float4x4
+            matrices[2] = matrix_identity_float4x4
+        }
     }
 }
 

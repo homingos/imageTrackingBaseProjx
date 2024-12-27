@@ -16,17 +16,24 @@ struct VertexDebug {
 
 class LayerImage {
     let name: String
-    let layerPriority: Int
+    let offset: SIMD3<Float>
     let image: UIImage?
     var texture: MTLTexture?
     
     // Initializer
-    init(name: String, layerPriority: Int, image: UIImage?, texture: MTLTexture? = nil) {
+    init(name: String, offset: SIMD3<Float>, image: UIImage?, texture: MTLTexture? = nil) {
         self.name = name
-        self.layerPriority = layerPriority
+        self.offset = offset
         self.image = image
         self.texture = texture
     }
+    func copy() -> LayerImage {
+        return LayerImage(name: name, offset: offset, image: image, texture: texture)
+    }
+}
+
+protocol ARMetalViewDelegate: AnyObject {
+    func willUpdateDraw(layerImages: [LayerImage]) ->[SIMD3<Float>]?
 }
 
 
@@ -42,8 +49,8 @@ class ARMetalViewDebug: MTKView {
     private var cameraTransform: simd_float4x4?
     private var projectionMatrix: simd_float4x4?
     
-    private var imageDic: [String: UIImage]!
     private var layerImages: [LayerImage] = []
+    private var layerImageDic: [String: LayerImage] = [:]
     
     private var stencilState: MTLDepthStencilState?
     private var maskRenderPipelineState: MTLRenderPipelineState!
@@ -51,7 +58,9 @@ class ARMetalViewDebug: MTKView {
     private var writeStencilState: MTLDepthStencilState?
     private var testStencilState: MTLDepthStencilState?
     
-    init?(frame: CGRect, device: MTLDevice, imageDic: [String: UIImage]) {
+    weak var viewControllerDelegate: ARMetalViewDelegate?
+    
+    init?(frame: CGRect, device: MTLDevice, layerDic: [String: LayerImage], viewControllerDelegate: ARMetalViewDelegate) {
         super.init(frame: frame, device: device)
         self.device = device
         
@@ -64,22 +73,25 @@ class ARMetalViewDebug: MTKView {
         self.framebufferOnly = false
         self.enableSetNeedsDisplay = true
         
-        self.imageDic = imageDic
+        self.layerImageDic = layerDic
         
         setupMetal()
         
-        setLayerImage(layerImage: imageDic)
-        
+        setLayerImage(layerImage: layerDic)
+        self.viewControllerDelegate = viewControllerDelegate
         //        setupDefaultVertices()
     }
     required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    func setLayerImage(layerImage: [String: UIImage]){
+    func setDelegate(controller: ARMetalViewDelegate){
+        self.viewControllerDelegate = controller
+    }
+    
+    func setLayerImage(layerImage: [String: LayerImage]){
         guard let device else { return }
         
-        self.imageDic = layerImage
         let textureLoader = MTKTextureLoader(device: device)
         let textureOptions: [MTKTextureLoader.Option: Any] = [
             .generateMipmaps: true,                     // Enable mipmapping
@@ -88,12 +100,11 @@ class ARMetalViewDebug: MTKView {
             .allocateMipmaps: true                      // Allocate space for mipmaps
         ]
         
-        for ele in imageDic{
-            let imageName = ele.key
+        for layer in layerImageDic{
+            let imageName = layer.key
+            let layerValues = layer.value
             
-            let layerPriority = extractIntValue(from: imageName) ?? 0
-            let layer = LayerImage(name: imageName, layerPriority: layerPriority, image: ele.value)
-            if let image = layer.image, let cgImage = image.cgImage {
+            if let image = layerValues.image, let cgImage = image.cgImage {
                 do {
                     // Create texture descriptor for high quality
                     let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -106,21 +117,20 @@ class ARMetalViewDebug: MTKView {
                     textureDescriptor.storageMode = .private
                     textureDescriptor.sampleCount = 1
                     
-                    layer.texture = try textureLoader.newTexture(
+                    layerValues.texture = try textureLoader.newTexture(
                         cgImage: cgImage,
                         options: textureOptions
                     )
-                    print("Layer texture loaded with high quality settings")
+//                    print("Layer texture loaded with high quality settings")
                 } catch {
                     print("Error loading texture: \(error)")
                 }
             }
-            layerImages.append(layer)
+            layerImages.append(layerValues)
         }
         
-        layerImages.sort { $0.layerPriority < $1.layerPriority }
+        layerImages.sort { $0.offset.y < $1.offset.y }
         setupLayerVertices()
-        
     }
     
     private func setupMetal() {
@@ -298,13 +308,16 @@ class ARMetalViewDebug: MTKView {
         
         for (index, layer) in layerImages.enumerated() {
             // Calculate offset based on layer priority
-            let zOffset =  Float(layer.layerPriority) * 0.1 // Small z-offset to prevent z-fighting
+            let zOffset =  Float(layer.offset.y) * 0.1 // Small z-offset to prevent z-fighting
+            let xOffset =  Float(layer.offset.x) // Small x-offset to prevent z-fighting
+            let yOffset =  Float(layer.offset.z) // Small y-offset to prevent z-fighting
             print("z offset: \(zOffset)")
+            
             let vertices: [VertexDebug] = [
-                VertexDebug(position: SIMD3<Float>(-0.5, zOffset, -0.5 ), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(0.5, zOffset, -0.5), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(-0.5, zOffset, 0.5), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(0.5, zOffset, 0.5), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
+                VertexDebug(position: SIMD3<Float>(-0.5 + xOffset, zOffset, -0.5 + yOffset), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(0.5 + xOffset, zOffset, -0.5 + yOffset), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(-0.5 + xOffset, zOffset, 0.5 + yOffset), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>(0.5 + xOffset, zOffset, 0.5 + yOffset), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
             ]
             
             let indices: [UInt16] = [
@@ -319,7 +332,6 @@ class ARMetalViewDebug: MTKView {
             ) {
                 vertexBuffers.append(vertexBuffer)
             }
-            
             if let indexBuffer = device?.makeBuffer(
                 bytes: indices,
                 length: indices.count * MemoryLayout<UInt16>.stride,
@@ -427,11 +439,31 @@ class ARMetalViewDebug: MTKView {
         // Update and set uniforms
         updateUniforms(uniformBuffer)
         contentEncoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
-        
+        let copiedLayerImages = layerImages.map { $0.copy() }
+        let newOffset = viewControllerDelegate?.willUpdateDraw(layerImages: copiedLayerImages)
+        var vertexB = vertexBuffers
+        if newOffset == nil {
+            
+        } else {
+            if let newOffset {
+                for i in 0..<vertexB.count {
+                    let existingVertexBuffer = vertexB[i]
+                    let layerIndex = i / 4
+                    let bufferPointer = existingVertexBuffer.contents().assumingMemoryBound(to: VertexDebug.self)
+                    print("before: \(bufferPointer[0].position)")
+                    bufferPointer[0].position += newOffset[layerIndex]
+                    bufferPointer[1].position += newOffset[layerIndex]
+                    bufferPointer[2].position += newOffset[layerIndex]
+                    bufferPointer[3].position += newOffset[layerIndex]
+
+                    print("after: \(bufferPointer[0].position)")
+                }
+            }
+        }
         // Draw each layer
         for i in 0..<layerImages.count {
             if let texture = layerImages[i].texture {
-                contentEncoder.setVertexBuffer(vertexBuffers[i], offset: 0, index: 0)
+                contentEncoder.setVertexBuffer(vertexB[i], offset: 0, index: 0)
                 contentEncoder.setFragmentTexture(texture, index: i)
                 
                 contentEncoder.drawIndexedPrimitives(

@@ -21,8 +21,7 @@ struct VertexOut {
 };
 
 // Mask vertex shader
-vertex VertexOut maskVertexShader(VertexIn in [[stage_in]],
-                                 constant float4x4 *matrices [[buffer(1)]]) {
+vertex VertexOut maskVertexShader(VertexIn in [[stage_in]], constant float4x4 *matrices [[buffer(1)]]) {
     VertexOut out;
     
     float4x4 modelMatrix = matrices[0];
@@ -44,8 +43,7 @@ fragment float4 maskFragmentShader(VertexOut in [[stage_in]]) {
 }
 
 // Main vertex shader
-vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]],
-                                  constant float4x4 *matrices [[buffer(1)]]) {
+vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]], constant float4x4 *matrices [[buffer(1)]]) {
     VertexOut out;
     
     float4x4 modelMatrix = matrices[0];

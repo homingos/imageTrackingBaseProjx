@@ -8,7 +8,8 @@
 import UIKit
 import ARKit
 
-class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SCNSceneRendererDelegate {
+class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SCNSceneRendererDelegate, ARMetalViewDelegate {
+
     @IBOutlet weak var sceneView: ARSCNView!
     private var metalView: ARMetalViewDebug?
     private var arSession: ARSession!
@@ -42,18 +43,20 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         let rootImages = [
             "0", "1", "2", "2_1", "3", "4"
         ]
-        var imageSet: [String: UIImage] = [:]
+        var imageSet: [String: LayerImage] = [:]
         
         for imageName in rootImages {
             if let image = UIImage(named: imageName) {
                 print("Found image: \(imageName)")
-                imageSet[imageName] = image
+                let layerPriority = extractIntValue(from: imageName) ?? 0
+                let offset = SIMD3(0.0, Float(layerPriority), 0.0)
+                imageSet[imageName] = LayerImage(name: imageName, offset: offset, image: image)
             } else {
                 print("Missing image: \(imageName)")
             }
         }
         // Create Metal view
-        metalView = ARMetalViewDebug(frame: view.bounds, device: device, imageDic: imageSet)
+        metalView = ARMetalViewDebug(frame: view.bounds, device: device, layerDic: imageSet, viewControllerDelegate: self)
         if let metalView = metalView {
             view.addSubview(metalView)
             metalView.frame = view.bounds
@@ -199,6 +202,22 @@ extension ViewController {
                 //                print("did update")
             }
         }
+    }
+    
+    func willUpdateDraw(layerImages: [LayerImage]) -> [SIMD3<Float>]? {
+        
+        return nil
+        // if want to animate
+        var offsets: [SIMD3<Float>] = []
+        
+        for ele in layerImages {
+            
+            var offset = ele.offset
+            offset.y = 0.0
+            offset.x = 0.01
+            offsets.append(offset)
+        }
+        return offsets
     }
     
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {

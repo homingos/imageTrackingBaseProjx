@@ -47,12 +47,11 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         
         for imageName in rootImages {
             if let image = UIImage(named: imageName) {
-                print("Found image: \(imageName)")
                 let layerPriority = extractIntValue(from: imageName) ?? 0
                 let offset = SIMD3(0.0, Float(layerPriority), 0.0)
                 var scale: Float = 1.0
                 if imageName == "-4" {
-                    scale = 1.5
+                    scale = 2.0
                 }
                 imageSet[imageName] = LayerImage(name: imageName, offset: offset, image: image, scale: scale)
             } else {
@@ -81,7 +80,6 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         
         view.bringSubviewToFront(metalView!)
         
-
         // Configure AR
         let configuration = ARImageTrackingConfiguration()
         if let trackedImages = ARReferenceImage.referenceImages(inGroupNamed: "ImageForAR", bundle: nil) {
@@ -93,6 +91,7 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
             for image in trackedImages {
                 print("Reference image name: \(image.name ?? "unnamed")")
                 print("Physical size: \(image.physicalSize)")
+                metalView?.setTargetSize(targetSize: image.physicalSize)
             }
         } else {
             print("Reference images not found")
@@ -110,10 +109,7 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         guard let frame = sceneView.session.currentFrame else { return }
         
         let camera = frame.camera
-        let projectionMatrix = camera.projectionMatrix(for: .portrait,
-                                                       viewportSize: view.bounds.size,
-                                                       zNear: 0.001,
-                                                       zFar: 1000)
+        let projectionMatrix = camera.projectionMatrix(for: .portrait, viewportSize: view.bounds.size, zNear: 0.001, zFar: 1000)
         
         if let imageAnchor = currentImageAnchor, imageAnchor.isTracked {
             var coordinateSpaceTransform = matrix_identity_float4x4

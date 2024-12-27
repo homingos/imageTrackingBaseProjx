@@ -61,6 +61,7 @@ class ARMetalViewDebug: MTKView {
     private var testStencilState: MTLDepthStencilState?
     
     weak var viewControllerDelegate: ARMetalViewDelegate?
+    private var targetExtent: CGSize?
     
     init?(frame: CGRect, device: MTLDevice, layerDic: [String: LayerImage], viewControllerDelegate: ARMetalViewDelegate) {
         super.init(frame: frame, device: device)
@@ -89,6 +90,15 @@ class ARMetalViewDebug: MTKView {
     
     func setDelegate(controller: ARMetalViewDelegate){
         self.viewControllerDelegate = controller
+    }
+    
+    func setTargetSize(targetSize: CGSize){
+        targetExtent = targetSize
+        updateVertexBuffer()
+    }
+    
+    private func updateVertexBuffer(){
+        setupLayerVertices()
     }
     
     func setLayerImage(layerImage: [String: LayerImage]){
@@ -315,13 +325,15 @@ class ARMetalViewDebug: MTKView {
             let yOffset =  Float(layer.offset.z) // Small y-offset to prevent z-fighting
             print("z offset: \(zOffset)")
             
+            var extent = targetExtent ?? CGSize(width: 1.0, height: 1.0)
+            print("extent: \(extent)")
             let scale = layer.scale
             
             let vertices: [VertexDebug] = [
-                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale, zOffset, (-0.5 + yOffset) * scale), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale, zOffset, (-0.5 + yOffset) * scale), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale, zOffset, (0.5 + yOffset) * scale), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale, zOffset, (0.5 + yOffset) * scale), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
+                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale * Float(extent.width), zOffset, (-0.5 + yOffset) * scale * Float(extent.height)), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale * Float(extent.width), zOffset, (-0.5 + yOffset) * scale * Float(extent.height)) , texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale * Float(extent.width), zOffset, (0.5 + yOffset) * scale * Float(extent.height)) , texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale * Float(extent.width), zOffset, (0.5 + yOffset) * scale * Float(extent.height)), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
             ]
             
             let indices: [UInt16] = [
@@ -417,6 +429,7 @@ class ARMetalViewDebug: MTKView {
         maskEncoder.setStencilReferenceValue(1)
         
         // Render mask geometry
+        // TODO: Create the buffer only once not every frame
         let maskVertices = createMaskVertices()
         let maskVertexBuffer = device?.makeBuffer(
             bytes: maskVertices,
@@ -486,12 +499,13 @@ class ARMetalViewDebug: MTKView {
     }
     
     private func createMaskVertices() -> [VertexDebug] {
-        let size: Float = 0.5 // Adjust this value to change the size of the mask
+        let extent = targetExtent ?? CGSize(width: 1.0, height: 1.0)
+        let point: Float = 0.5 // Adjust this value to change the size of the mask
         return [
-            VertexDebug(position: SIMD3<Float>(-size, 0, -size), texCoord: SIMD2<Float>(0, 1), textureIndex: 0),
-            VertexDebug(position: SIMD3<Float>(size,0, -size), texCoord: SIMD2<Float>(1, 1), textureIndex: 0),
-            VertexDebug(position: SIMD3<Float>(-size, 0, size), texCoord: SIMD2<Float>(0, 0), textureIndex: 0),
-            VertexDebug(position: SIMD3<Float>(size, 0, size), texCoord: SIMD2<Float>(1, 0), textureIndex: 0)
+            VertexDebug(position: SIMD3<Float>(-point * Float(extent.width), 0, -point * Float(extent.height)), texCoord: SIMD2<Float>(0, 1), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(point * Float(extent.width),0, -point * Float(extent.height)), texCoord: SIMD2<Float>(1, 1), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(-point * Float(extent.width), 0, point * Float(extent.height)), texCoord: SIMD2<Float>(0, 0), textureIndex: 0),
+            VertexDebug(position: SIMD3<Float>(point * Float(extent.width), 0, point * Float(extent.height)), texCoord: SIMD2<Float>(1, 0), textureIndex: 0)
         ]
     }
     

@@ -41,7 +41,7 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
         }
         
         let rootImages = [
-            "0", "1", "2", "2_1", "3", "4"
+            "0", "-1", "-2", "-2_1", "-3", "-4"
         ]
         var imageSet: [String: LayerImage] = [:]
         
@@ -50,7 +50,11 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
                 print("Found image: \(imageName)")
                 let layerPriority = extractIntValue(from: imageName) ?? 0
                 let offset = SIMD3(0.0, Float(layerPriority), 0.0)
-                imageSet[imageName] = LayerImage(name: imageName, offset: offset, image: image)
+                var scale: Float = 1.0
+                if imageName == "-4" {
+                    scale = 1.5
+                }
+                imageSet[imageName] = LayerImage(name: imageName, offset: offset, image: image, scale: scale)
             } else {
                 print("Missing image: \(imageName)")
             }
@@ -209,9 +213,7 @@ extension ViewController {
         return nil
         // if want to animate
         var offsets: [SIMD3<Float>] = []
-        
         for ele in layerImages {
-            
             var offset = ele.offset
             offset.y = 0.0
             offset.x = 0.01

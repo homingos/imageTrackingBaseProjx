@@ -19,13 +19,15 @@ class LayerImage {
     let offset: SIMD3<Float>
     let image: UIImage?
     var texture: MTLTexture?
+    var scale: Float
     
     // Initializer
-    init(name: String, offset: SIMD3<Float>, image: UIImage?, texture: MTLTexture? = nil) {
+    init(name: String, offset: SIMD3<Float>, image: UIImage?, texture: MTLTexture? = nil, scale: Float = 1.0) {
         self.name = name
         self.offset = offset
         self.image = image
         self.texture = texture
+        self.scale = scale
     }
     func copy() -> LayerImage {
         return LayerImage(name: name, offset: offset, image: image, texture: texture)
@@ -313,11 +315,13 @@ class ARMetalViewDebug: MTKView {
             let yOffset =  Float(layer.offset.z) // Small y-offset to prevent z-fighting
             print("z offset: \(zOffset)")
             
+            let scale = layer.scale
+            
             let vertices: [VertexDebug] = [
-                VertexDebug(position: SIMD3<Float>(-0.5 + xOffset, zOffset, -0.5 + yOffset), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(0.5 + xOffset, zOffset, -0.5 + yOffset), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(-0.5 + xOffset, zOffset, 0.5 + yOffset), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
-                VertexDebug(position: SIMD3<Float>(0.5 + xOffset, zOffset, 0.5 + yOffset), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
+                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale, zOffset, (-0.5 + yOffset) * scale), texCoord: SIMD2<Float>(0.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale, zOffset, (-0.5 + yOffset) * scale), texCoord: SIMD2<Float>(1.0, 1.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((-0.5 + xOffset) * scale, zOffset, (0.5 + yOffset) * scale), texCoord: SIMD2<Float>(0.0, 0.0), textureIndex: UInt32(index)),
+                VertexDebug(position: SIMD3<Float>((0.5 + xOffset) * scale, zOffset, (0.5 + yOffset) * scale), texCoord: SIMD2<Float>(1.0, 0.0), textureIndex: UInt32(index))
             ]
             
             let indices: [UInt16] = [

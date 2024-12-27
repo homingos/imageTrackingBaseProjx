@@ -11,7 +11,7 @@ import ARKit
 class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SCNSceneRendererDelegate, ARMetalViewDelegate {
 
     @IBOutlet weak var sceneView: ARSCNView!
-    private var metalView: ARMetalViewDebug?
+    private var metalView: ARMetalView?
     private var arSession: ARSession!
     private var currentImageAnchor: ARImageAnchor?
     private var displayLink: CADisplayLink?
@@ -59,7 +59,7 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate, SC
             }
         }
         // Create Metal view
-        metalView = ARMetalViewDebug(frame: view.bounds, device: device, layerDic: imageSet, viewControllerDelegate: self)
+        metalView = ARMetalView(frame: view.bounds, device: device, layerDic: imageSet, viewControllerDelegate: self)
         if let metalView = metalView {
             view.addSubview(metalView)
             metalView.frame = view.bounds

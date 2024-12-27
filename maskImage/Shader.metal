@@ -43,7 +43,7 @@ fragment float4 maskFragmentShader(VertexOut in [[stage_in]]) {
 }
 
 // Main vertex shader
-vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]], constant float4x4 *matrices [[buffer(1)]]) {
+vertex VertexOut vertexShader(VertexIn in [[stage_in]], constant float4x4 *matrices [[buffer(1)]]) {
     VertexOut out;
     
     float4x4 modelMatrix = matrices[0];
@@ -59,7 +59,7 @@ vertex VertexOut vertexShaderDebug(VertexIn in [[stage_in]], constant float4x4 *
 }
 
 // Main fragment shader
-fragment float4 fragmentShaderDebug(VertexOut in [[stage_in]],
+fragment float4 fragmentShader(VertexOut in [[stage_in]],
                                   array<texture2d<float>, 8> textures [[texture(0)]],
                                   sampler textureSampler [[sampler(0)]]) {
     // Sample from the appropriate texture based on the index
